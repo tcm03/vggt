@@ -58,7 +58,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
         if query_points is not None and len(query_points.shape) == 2:
             query_points = query_points.unsqueeze(0)
 
-        aggregated_tokens_list, patch_start_idx = self.aggregator(images)
+        aggregated_tokens_list, patch_start_idx = self.aggregator(images) # [2026-01-26] @tcm: aggregated_tokens_list = [torch.Size[1, B=25, S=930, D=2048]] x L=24
 
         predictions = {}
 
@@ -71,9 +71,9 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
             if self.depth_head is not None:
                 depth, depth_conf = self.depth_head(
                     aggregated_tokens_list, images=images, patch_start_idx=patch_start_idx
-                )
-                predictions["depth"] = depth
-                predictions["depth_conf"] = depth_conf
+                ) # [2026-01-26] @tcm: images.shape = [1, 25, 3, H=350, W=518], patch_start_idx = 5
+                predictions["depth"] = depth # [2026-01-26] @tcm: depth.shape = [1, 25, H=350, W=518, 1]
+                predictions["depth_conf"] = depth_conf # [2026-01-26] @tcm: depth_conf.shape = [1, 25, H=350, W=518]
 
             if self.point_head is not None:
                 pts3d, pts3d_conf = self.point_head(

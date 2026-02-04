@@ -151,7 +151,7 @@ class DPTHead(nn.Module):
             frames_end_idx = min(frames_start_idx + frames_chunk_size, S)
 
             # Process batch of frames
-            if self.feature_only:
+            if self.feature_only: # [2026-01-26] @tcm: False
                 chunk_output = self._forward_impl(
                     aggregated_tokens_list, images, patch_start_idx, frames_start_idx, frames_end_idx
                 )
@@ -159,7 +159,7 @@ class DPTHead(nn.Module):
             else:
                 chunk_preds, chunk_conf = self._forward_impl(
                     aggregated_tokens_list, images, patch_start_idx, frames_start_idx, frames_end_idx
-                )
+                ) # [2026-01-26] @tcm: chunk_preds.shape = [1, #frames=8, H=350, W=518, 1], chunk_conf.shape = [1, #frames=8, H=350, W=518]
                 all_preds.append(chunk_preds)
                 all_conf.append(chunk_conf)
 
@@ -167,7 +167,7 @@ class DPTHead(nn.Module):
         if self.feature_only:
             return torch.cat(all_preds, dim=1)
         else:
-            return torch.cat(all_preds, dim=1), torch.cat(all_conf, dim=1)
+            return torch.cat(all_preds, dim=1), torch.cat(all_conf, dim=1) # [2026-01-26]: all_preds shape = [1, 25, H=350, W=518, 1], all_conf shape = [1, 25, H=350, W=518]
 
     def _forward_impl(
         self,

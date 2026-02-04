@@ -64,30 +64,30 @@ SEEN_CATEGORIES = [
 ]
 
 
-class Co3dDataset(BaseDataset):
+class PMDataset(BaseDataset):
     def __init__(
         self,
         common_conf,
         split: str = "train",
-        CO3D_DIR: str = None,
-        CO3D_ANNOTATION_DIR: str = None,
+        PM_DIR: str = None,
+        PM_ANNOTATION_DIR: str = None,
         min_num_images: int = 24,
         len_train: int = 100000,
         len_test: int = 10000,
     ):
         """
-        Initialize the Co3dDataset.
+        Initialize the PMDataset.
 
         Args:
             common_conf: Configuration object with common settings.
             split (str): Dataset split, either 'train' or 'test'.
-            CO3D_DIR (str): Directory path to CO3D data.
-            CO3D_ANNOTATION_DIR (str): Directory path to CO3D annotations.
+            PM_DIR (str): Directory path to PM data.
+            PM_ANNOTATION_DIR (str): Directory path to PM annotations.
             min_num_images (int): Minimum number of images per sequence.
             len_train (int): Length of the training dataset.
             len_test (int): Length of the test dataset.
         Raises:
-            ValueError: If CO3D_DIR or CO3D_ANNOTATION_DIR is not specified.
+            ValueError: If PM_DIR or PM_ANNOTATION_DIR is not specified.
         """
         super().__init__(common_conf=common_conf)
 
@@ -98,8 +98,8 @@ class Co3dDataset(BaseDataset):
         self.inside_random = common_conf.inside_random
         self.allow_duplicate_img = common_conf.allow_duplicate_img
 
-        if CO3D_DIR is None or CO3D_ANNOTATION_DIR is None:
-            raise ValueError("Both CO3D_DIR and CO3D_ANNOTATION_DIR must be specified.")
+        if PM_DIR is None or PM_ANNOTATION_DIR is None:
+            raise ValueError("Both PM_DIR and PM_ANNOTATION_DIR must be specified.")
 
         category = sorted(SEEN_CATEGORIES)
 
@@ -123,17 +123,17 @@ class Co3dDataset(BaseDataset):
         self.seqlen = None
         self.min_num_images = min_num_images
 
-        logging.info(f"CO3D_DIR is {CO3D_DIR}")
+        logging.info(f"PM_DIR is {PM_DIR}")
 
-        self.CO3D_DIR = CO3D_DIR
-        self.CO3D_ANNOTATION_DIR = CO3D_ANNOTATION_DIR
+        self.PM_DIR = PM_DIR
+        self.PM_ANNOTATION_DIR = PM_ANNOTATION_DIR
 
         total_frame_num = 0
 
         for c in category:
             for split_name in split_name_list:
                 annotation_file = osp.join(
-                    self.CO3D_ANNOTATION_DIR, f"{c}_{split_name}.jgz"
+                    self.PM_ANNOTATION_DIR, f"{c}_{split_name}.jgz"
                 )
 
                 try:
@@ -156,8 +156,8 @@ class Co3dDataset(BaseDataset):
         self.total_frame_num = total_frame_num
 
         status = "Training" if self.training else "Testing"
-        logging.info(f"{status}: Co3D Data size: {self.sequence_list_len}")
-        logging.info(f"{status}: Co3D Data dataset length: {len(self)}")
+        logging.info(f"{status}: PM Data size: {self.sequence_list_len}")
+        logging.info(f"{status}: PM Data dataset length: {len(self)}")
 
     def get_data(
         self,
@@ -210,7 +210,7 @@ class Co3dDataset(BaseDataset):
         for anno in annos:
             filepath = anno["filepath"]
 
-            image_path = osp.join(self.CO3D_DIR, filepath)
+            image_path = osp.join(self.PM_DIR, filepath)
             image = read_image_cv2(image_path)
 
             if self.load_depth:
@@ -262,7 +262,7 @@ class Co3dDataset(BaseDataset):
             image_paths.append(image_path)
             original_sizes.append(original_size)
 
-        set_name = "co3d"
+        set_name = "PM"
 
         batch = {
             "seq_name": set_name + "_" + seq_name,

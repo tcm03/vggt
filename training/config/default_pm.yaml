@@ -28,7 +28,7 @@ data:
     dataset:
       _target_: data.composed_dataset.ComposedDataset
       dataset_configs:
-        - _target_: data.datasets.co3d.Co3dDataset
+        - _target_: data.datasets.pm.PMDataset
           split: train
           CO3D_DIR: /home/minhtc8/lustre/minhtc8/vggt/co3d_subset/
           CO3D_ANNOTATION_DIR: /home/minhtc8/lustre/minhtc8/vggt/co3d_anno_tmp/
@@ -43,7 +43,7 @@ data:
     dataset:
       _target_: data.composed_dataset.ComposedDataset
       dataset_configs:
-        - _target_: data.datasets.co3d.Co3dDataset
+        - _target_: data.datasets.pm.PMDataset
           split: test
           CO3D_DIR: /home/minhtc8/lustre/minhtc8/vggt/co3d_subset/
           CO3D_ANNOTATION_DIR: /home/minhtc8/lustre/minhtc8/vggt/co3d_anno_tmp/

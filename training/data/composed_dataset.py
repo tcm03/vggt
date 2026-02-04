@@ -66,9 +66,9 @@ class ComposedDataset(Dataset, ABC):
 
         # --- Track Settings ---
         # Whether to include point tracks in the output
-        self.load_track = common_config.load_track
+        self.load_track = common_config.load_track # [2026-02-04] @tcm: False
         # Number of point tracks to include per sequence
-        self.track_num = common_config.track_num
+        self.track_num = common_config.track_num # [2026-02-04] @tcm: 1024
 
         # --- Mode Settings ---
         # Whether the dataset is being used for training (affects augmentations)

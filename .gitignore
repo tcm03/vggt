@@ -1,3 +1,11 @@
+.vscode/
+checkpoints/
+co3d_anno/
+co3d_anno_tmp/
+co3d_subset/
+logs/
+training/logs/
+
 .hydra/
 output/
 ckpt/

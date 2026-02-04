@@ -1,0 +1,1 @@
+python -m debugpy --listen 0.0.0.0:8106 --wait-for-client inference.py

@@ -35,6 +35,29 @@ def activate_pose(pred_pose_enc, trans_act="linear", quat_act="linear", fl_act="
     return pred_pose_enc
 
 
+def activate_pose_axis(pred_pose_enc, trans_act="linear", quat_act="linear"):
+    """
+    Activate pose parameters with specified activation functions.
+
+    Args:
+        pred_pose_enc: Tensor containing encoded pose parameters [translation, quaternion]
+        trans_act: Activation type for translation component
+        quat_act: Activation type for quaternion component
+
+    Returns:
+        Activated pose parameters tensor
+    """
+    T = pred_pose_enc[..., :3]
+    quat = pred_pose_enc[..., 3:7]
+
+    T = base_pose_act(T, trans_act)
+    quat = base_pose_act(quat, quat_act)
+
+    pred_pose_enc = torch.cat([T, quat], dim=-1)
+
+    return pred_pose_enc
+
+
 def base_pose_act(pose_enc, act_type="linear"):
     """
     Apply basic activation function to pose parameters.
@@ -97,6 +120,8 @@ def activate_head(out, activation="norm_exp", conf_activation="expp1"):
         pts3d = torch.sigmoid(xyz)
     elif activation == "linear":
         pts3d = xyz
+    elif activation == "softmax":
+        pts3d = torch.softmax(xyz, dim=-1)
     else:
         raise ValueError(f"Unknown activation: {activation}")
 
