@@ -5,10 +5,10 @@ exp_name: exp001
 img_size: 518
 num_workers: 8
 seed_value: 42
-accum_steps: 2    # We did not use gradient accumulation in our training, while if you suffer from OOM, you can try to use it.
+accum_steps: 1    # We did not use gradient accumulation in our training, while if you suffer from OOM, you can try to use it.
 patch_size: 14
 val_epoch_freq: 5
-max_img_per_gpu: 48
+max_img_per_gpu: 24
 
 limit_train_batches: 800
 limit_val_batches: 400
@@ -25,13 +25,14 @@ data:
       patch_size: ${patch_size}
       debug: False
       repeat_batch: False
+      load_depth: False
     dataset:
-      _target_: data.composed_dataset.ComposedDataset
+      _target_: data.articulate_composed_dataset.ArticulateComposedDataset
       dataset_configs:
         - _target_: data.datasets.pm.PMDataset
           split: train
-          CO3D_DIR: /home/minhtc8/lustre/minhtc8/vggt/co3d_subset/
-          CO3D_ANNOTATION_DIR: /home/minhtc8/lustre/minhtc8/vggt/co3d_anno_tmp/
+          PM_DIR: /home/minhtc8/lustre/minhtc8/sapien/preprocessed_pm/
+          PM_ANNOTATION_PATH: /home/minhtc8/lustre/minhtc8/sapien/larm.json
   val:
     _target_: data.dynamic_dataloader.DynamicTorchDataset
     num_workers: ${num_workers}
@@ -40,13 +41,14 @@ data:
       img_size: ${img_size}
       patch_size: ${patch_size}
       debug: False
+      load_depth: False
     dataset:
-      _target_: data.composed_dataset.ComposedDataset
+      _target_: data.articulate_composed_dataset.ArticulateComposedDataset
       dataset_configs:
         - _target_: data.datasets.pm.PMDataset
           split: test
-          CO3D_DIR: /home/minhtc8/lustre/minhtc8/vggt/co3d_subset/
-          CO3D_ANNOTATION_DIR: /home/minhtc8/lustre/minhtc8/vggt/co3d_anno_tmp/
+          PM_DIR: /home/minhtc8/lustre/minhtc8/sapien/preprocessed_pm/
+          PM_ANNOTATION_PATH: /home/minhtc8/lustre/minhtc8/sapien/larm.json
 
 
 logging:
@@ -62,24 +64,18 @@ logging:
   scalar_keys_to_log:
     train:
       keys_to_log:
+        - loss_joint_type
+        - loss_joint_axis
+        - loss_joint_origin
+        - loss_segmentation
         - loss_objective
-        - loss_camera
-        - loss_T
-        - loss_R
-        - loss_FL
-        - loss_conf_depth
-        - loss_reg_depth
-        - loss_grad_depth
     val:
       keys_to_log:
+        - loss_joint_type
+        - loss_joint_axis
+        - loss_joint_origin
+        - loss_segmentation
         - loss_objective
-        - loss_camera
-        - loss_T
-        - loss_R
-        - loss_FL
-        - loss_conf_depth
-        - loss_reg_depth
-        - loss_grad_depth
 
 
 
@@ -91,11 +87,14 @@ checkpoint:
 
 
 loss:
-  _target_: loss.MultitaskLoss
-  camera: 
+  _target_: articulate_loss.MultitaskLoss
+  cls:
+    weight: 5.0
+    loss_type: "l1"
+  axis: 
     weight: 5.0
     loss_type: "l1" # The paper uses smooth l1 loss, but we found l1 loss is more stable than smooth l1 and l2 loss.  
-  depth:
+  segmentation:
     weight: 1.0
     gradient_loss_fn: "grad" 
     valid_range: 0.98
@@ -130,10 +129,13 @@ optim:
       - module_name: ["aggregator"]
         max_norm: 1.0   # feel free to reduce this if you see instabilities
         norm_type: 2
-      - module_name: ["depth"]
+      - module_name: ["segmentation"]
         max_norm: 1.0   # feel free to reduce this if you see instabilities
         norm_type: 2
-      - module_name: ["camera"]
+      - module_name: ["axis"]
+        max_norm: 1.0   # feel free to reduce this if you see instabilities
+        norm_type: 2
+      - module_name: ["cls"]
         max_norm: 1.0   # feel free to reduce this if you see instabilities
         norm_type: 2
   options:
@@ -157,14 +159,12 @@ optim:
 
 
 
-max_epochs: 20
+max_epochs: 1
 
 model:
-  _target_: vggt.models.vggt.VGGT
-  enable_camera: True
-  enable_depth: True
-  enable_point: False
-  enable_track: False
+  _target_: vggt.models.vggticulate.VGGTiculate
+  enable_axis: True
+  enable_segmentation: True
 
 
 distributed:

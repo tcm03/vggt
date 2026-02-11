@@ -125,7 +125,7 @@ class AggregatorArticulate(nn.Module):
         # Note: We have two axis tokens, one for the first frame and one for the rest
         # The same applies for register tokens
         self.axis_token = nn.Parameter(torch.randn(1, 2, 1, embed_dim))
-        self.cls_token = nn.Parameter(torch.randn(1, 1, 1, embed_dim))
+        self.cls_token = nn.Parameter(torch.randn(1, 2, 1, embed_dim)) # [2026-02-04] @tcm: 1 for 1st frame, 1 for remainings to predict type of each joint
         self.register_token = nn.Parameter(torch.randn(1, 2, num_register_tokens, embed_dim))
 
         # The patch tokens start after the axis and register tokens
@@ -328,7 +328,6 @@ def slice_expand_and_flatten(token_tensor, B, S):
     others = token_tensor[:, 1:, ...].expand(B, S - 1, *token_tensor.shape[2:])
     # Concatenate => shape (B, S, ...)
     combined = torch.cat([query, others], dim=1)
-
     # Finally flatten => shape (B*S, ...)
     combined = combined.view(B * S, *combined.shape[2:])
     return combined

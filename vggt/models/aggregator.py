@@ -202,7 +202,7 @@ class Aggregator(nn.Module):
 
         # Reshape to [B*S, C, H, W] for patch embedding
         images = images.view(B * S, C_in, H, W)
-        patch_tokens = self.patch_embed(images)
+        patch_tokens = self.patch_embed(images) # [2026-02-04] @tcm: patch_tokens.shape = [#frames = 25, #patches=925, dim=1024]
 
         if isinstance(patch_tokens, dict):
             patch_tokens = patch_tokens["x_norm_patchtokens"]
@@ -210,11 +210,11 @@ class Aggregator(nn.Module):
         _, P, C = patch_tokens.shape
 
         # Expand camera and register tokens to match batch size and sequence length
-        camera_token = slice_expand_and_flatten(self.camera_token, B, S)
-        register_token = slice_expand_and_flatten(self.register_token, B, S)
+        camera_token = slice_expand_and_flatten(self.camera_token, B, S) # [2026-02-04] @tcm: camera_token.shape = [#frames = 25, 1, #dim = 1024]
+        register_token = slice_expand_and_flatten(self.register_token, B, S) # [2026-02-04] @tcm: register_token.shape = [#frames = 25, 4, #dim = 1024]
 
         # Concatenate special tokens with patch tokens
-        tokens = torch.cat([camera_token, register_token, patch_tokens], dim=1)
+        tokens = torch.cat([camera_token, register_token, patch_tokens], dim=1) # [2026-02-04] @tcm: tokens.shape = [#frames = 25, #patches+#camera+#register=930, #dim=1024]
 
         pos = None
         if self.rope is not None:
@@ -225,7 +225,7 @@ class Aggregator(nn.Module):
             # so set pos to 0 for the special tokens
             pos = pos + 1
             pos_special = torch.zeros(B * S, self.patch_start_idx, 2).to(images.device).to(pos.dtype)
-            pos = torch.cat([pos_special, pos], dim=1)
+            pos = torch.cat([pos_special, pos], dim=1) # [2026-02-04] @tcm: pos.shape = [#frames=25, #patches+#camera+#register=930, 2]
 
         # update P because we added special tokens
         _, P, C = tokens.shape
@@ -235,7 +235,7 @@ class Aggregator(nn.Module):
         output_list = []
 
         for _ in range(self.aa_block_num):
-            for attn_type in self.aa_order:
+            for attn_type in self.aa_order: # [2026-02-04] @tcm: tokens.shape = [#frames = 25, #patches+#camera+#register=930, #dim=1024]
                 if attn_type == "frame":
                     tokens, frame_idx, frame_intermediates = self._process_frame_attention(
                         tokens, B, S, P, C, frame_idx, pos=pos
@@ -249,7 +249,7 @@ class Aggregator(nn.Module):
 
             for i in range(len(frame_intermediates)):
                 # concat frame and global intermediates, [B x S x P x 2C]
-                concat_inter = torch.cat([frame_intermediates[i], global_intermediates[i]], dim=-1)
+                concat_inter = torch.cat([frame_intermediates[i], global_intermediates[i]], dim=-1) # [2026-02-04] @tcm: concat_inter.shape = [1, #frames=25, #patches+#camera+#register=930, dim=2048]
                 output_list.append(concat_inter)
 
         del concat_inter

@@ -18,7 +18,7 @@ from .track_util import *
 from .augmentation import get_image_augmentation
 
 
-class ComposedDataset(Dataset, ABC):
+class ArticulateComposedDataset(Dataset, ABC):
     """
     Composes multiple base datasets and applies common configurations.
 
@@ -29,7 +29,7 @@ class ComposedDataset(Dataset, ABC):
     """
     def __init__(self, dataset_configs: dict, common_config: dict, **kwargs):
         """
-        Initializes the ComposedDataset.
+        Initializes the ArticulateComposedDataset.
 
         Args:
             dataset_configs (dict): List of Hydra configurations for base datasets.
@@ -64,12 +64,6 @@ class ComposedDataset(Dataset, ABC):
         # Force a specific aspect ratio for all images
         self.fixed_aspect_ratio = common_config.fix_aspect_ratio
 
-        # --- Track Settings ---
-        # Whether to include point tracks in the output
-        self.load_track = common_config.load_track # [2026-02-04] @tcm: False
-        # Number of point tracks to include per sequence
-        self.track_num = common_config.track_num # [2026-02-04] @tcm: 1024
-
         # --- Mode Settings ---
         # Whether the dataset is being used for training (affects augmentations)
         self.training = common_config.training
@@ -102,23 +96,24 @@ class ComposedDataset(Dataset, ABC):
 
         # Retrieve the raw data batch from the appropriate base dataset
         batch = self.base_dataset[idx_tuple]
-        seq_name = batch["seq_name"] # [2026-02-10] @tcm: e.g. co3d_189_20393_38136
+        sample_id = batch["sample_id"]
 
         # --- Data Conversion and Preparation ---
         # Convert numpy arrays to tensors
         images = torch.from_numpy(np.stack(batch["images"]).astype(np.float32)).contiguous() # [2026-02-10] @tcm: images.shape = [#views=9, H=476, W=518, C=3]
         # Normalize images from [0, 255] to [0, 1]
         images = images.permute(0,3,1,2).to(torch.get_default_dtype()).div(255)
+        
+        seg_images = torch.from_numpy(np.stack(batch["seg_images"])).long().contiguous() # [2026-02-10] @tcm: seg_images.shape = [1, H=476, W=518]
 
         # Convert other data to tensors with appropriate types
-        depths = torch.from_numpy(np.stack(batch["depths"]).astype(np.float32))
         extrinsics = torch.from_numpy(np.stack(batch["extrinsics"]).astype(np.float32))
         intrinsics = torch.from_numpy(np.stack(batch["intrinsics"]).astype(np.float32))
-        cam_points = torch.from_numpy(np.stack(batch["cam_points"]).astype(np.float32))
-        world_points = torch.from_numpy(np.stack(batch["world_points"]).astype(np.float32))
-        point_masks = torch.from_numpy(np.stack(batch["point_masks"]).astype(bool)) # Mask indicating valid depths / world points / cam points per frame
-        ids = torch.from_numpy(batch["ids"])    # Frame indices sampled from the original sequence
-
+        joint_types = torch.from_numpy(np.stack(batch["joint_types"]).astype(np.int64))
+        joint_axes = torch.from_numpy(np.stack(batch["joint_axes"]).astype(np.float32))
+        joint_origins = torch.from_numpy(np.stack(batch["joint_origins"]).astype(np.float32))
+        joint_ranges = torch.from_numpy(np.stack(batch["joint_ranges"]).astype(np.float32))
+        revolute_origin_masks = torch.tensor(batch["revolute_origin_masks"], dtype=torch.long)
 
         # --- Apply Color Augmentation (training mode only) ---
         if self.training and self.image_aug is not None:
@@ -133,53 +128,18 @@ class ComposedDataset(Dataset, ABC):
 
         # --- Prepare Final Sample Dictionary ---
         sample = {
-            "seq_name": seq_name,
-            "ids": ids,
+            "sample_id": sample_id,
             "images": images,
-            "depths": depths,
+            "seg_images": seg_images,
             "extrinsics": extrinsics,
             "intrinsics": intrinsics,
-            "cam_points": cam_points,
-            "world_points": world_points,
-            "point_masks": point_masks,
+            "joint_names": batch["joint_names"],
+            "joint_types": joint_types,
+            "revolute_origin_masks": revolute_origin_masks,
+            "joint_axes": joint_axes,
+            "joint_origins": joint_origins,
+            "joint_ranges": joint_ranges
         }
-
-        # --- Track Processing (if enabled) ---
-        if self.load_track:
-            if batch["tracks"] is not None:
-                # Use pre-computed tracks from the dataset
-                tracks = torch.from_numpy(np.stack(batch["tracks"]).astype(np.float32))
-                track_vis_mask = torch.from_numpy(np.stack(batch["track_masks"]).astype(bool))
-
-                # Sample a subset of tracks randomly
-                valid_indices = torch.where(track_vis_mask[0])[0]
-                if len(valid_indices) >= self.track_num:
-                    # If we have enough tracks, sample without replacement
-                    sampled_indices = valid_indices[torch.randperm(len(valid_indices))][:self.track_num]
-                else:
-                    # If not enough tracks, sample with replacement (allow duplicates)
-                    sampled_indices = valid_indices[torch.randint(0, len(valid_indices),
-                                                    (self.track_num,),
-                                                    dtype=torch.int64,
-                                                    device=valid_indices.device)]
-
-                # Extract the sampled tracks and their masks
-                tracks = tracks[:, sampled_indices, :]
-                track_vis_mask = track_vis_mask[:, sampled_indices]
-                track_positive_mask = torch.ones(track_vis_mask.shape[1]).bool()
-
-            else:
-                # Generate tracks on-the-fly using depth information
-                # This creates synthetic tracks based on the 3D information available
-                tracks, track_vis_mask, track_positive_mask = build_tracks_by_depth(
-                    extrinsics, intrinsics, world_points, depths, point_masks, images,
-                    target_track_num=self.track_num, seq_name=seq_name
-                )
-
-            # Add track information to the sample dictionary
-            sample["tracks"] = tracks
-            sample["track_vis_mask"] = track_vis_mask
-            sample["track_positive_mask"] = track_positive_mask
 
         return sample
 
@@ -258,4 +218,4 @@ class TupleConcatDataset(ConcatDataset):
             raise ValueError("Tuple index must have exactly three elements")
 
         # Pass the modified tuple to the appropriate dataset
-        return self.datasets[dataset_idx][idx_tuple] # [2026-02-10] @tcm: type(self.datasets[0]) = data.datasets.co3d.Co3dDataset; self.datasets[0][(5053, 9, 0.92)] = dict('seq_name', 'ids', 'frame_num', 'images', 'depths', 'extrinsics', 'intrinsics', 'cam_points', 'world_points', 'point_masks', 'original_sizes')
+        return self.datasets[dataset_idx][idx_tuple]

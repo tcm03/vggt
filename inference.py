@@ -1,5 +1,6 @@
 import torch
 from vggt.models.vggt import VGGT
+from vggt.models.vggticulate import VGGTiculate
 from vggt.utils.load_fn import load_and_preprocess_images
 import os
 
@@ -9,7 +10,7 @@ dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.
 
 # Initialize the model and load the pretrained weights.
 # This will automatically download the model weights the first time it's run, which may take a while.
-model = VGGT.from_pretrained("facebook/VGGT-1B").to(device)
+model = VGGTiculate.from_pretrained("facebook/VGGT-1B").to(device)
 
 # Load and preprocess example images (replace with your own image paths)
 image_names = [os.path.join("./examples/kitchen/images", filename) for filename in os.listdir("./examples/kitchen/images")]  

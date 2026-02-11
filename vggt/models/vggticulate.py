@@ -1,3 +1,4 @@
+
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -14,7 +15,7 @@ from vggt.heads.cls_head import ClsHead
 from vggt.heads.dpt_head import DPTHead
 
 
-class VGGT(nn.Module, PyTorchModelHubMixin):
+class VGGTiculate(nn.Module, PyTorchModelHubMixin):
     def __init__(
         self, 
         img_size=518, 
@@ -33,9 +34,9 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
         # self.point_head = DPTHead(dim_in=2 * embed_dim, output_dim=4, activation="inv_log", conf_activation="expp1") if enable_point else None
         self.segmentation_head = DPTHead(
             dim_in=2 * embed_dim, 
-            output_dim=2, 
-            activation="softmax", 
-            conf_activation="expp1" # don't care because we don't use confidence for segmentation
+            output_dim=3, # [2026-02-06] @tcm: 3 labels (background, base, artic. part), no confidence (but this seems to not be used when feature_only=True), but I make it useful even when feature_only=True (see DPTHead impl)
+            # activation="log_softmax", # [2026-02-11] @tcm: wouldn't be used if feature_only=True
+            feature_only=True # [2026-02-06] @tcm: don't need confidence for segmentation
         ) if enable_segmentation else None
 
     def forward(self, images: torch.Tensor):
@@ -75,7 +76,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                 predictions["pose_enc_list"] = pose_enc_list
                 
             if self.segmentation_head is not None:
-                segmentation, _ = self.segmentation_head(
+                segmentation = self.segmentation_head(
                     aggregated_tokens_list, images=images, patch_start_idx=patch_start_idx
                 )
                 predictions["segmentation"] = segmentation

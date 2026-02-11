@@ -150,10 +150,10 @@ class Co3dDataset(BaseDataset):
                         continue
                     total_frame_num += len(seq_data)
                     self.data_store[seq_name] = seq_data
-
+        # [2026-02-10] @tcm: self.data_store[seq_name='110_13051_23361'] = 202 x [dict(filepath, extri, intri)]
         self.sequence_list = list(self.data_store.keys())
         self.sequence_list_len = len(self.sequence_list)
-        self.total_frame_num = total_frame_num
+        self.total_frame_num = total_frame_num # [2026-02-10] @tcm: e.g. 404
 
         status = "Training" if self.training else "Testing"
         logging.info(f"{status}: Co3D Data size: {self.sequence_list_len}")
@@ -161,11 +161,11 @@ class Co3dDataset(BaseDataset):
 
     def get_data(
         self,
-        seq_index: int = None,
-        img_per_seq: int = None,
-        seq_name: str = None,
-        ids: list = None,
-        aspect_ratio: float = 1.0,
+        seq_index: int = None, # [2026-02-10] @tcm: which scene sample?
+        img_per_seq: int = None, # [2026-02-10] @tcm: how many view images for this?
+        seq_name: str = None, # [2026-02-10] @tcm: key to extract scene sample
+        ids: list = None, # [2026-02-10] @tcm: index of views for current scene sample to return their information
+        aspect_ratio: float = 1.0, # [2026-02-10] @tcm: target image shape
     ) -> dict:
         """
         Retrieve data for a specific sequence.
@@ -195,7 +195,7 @@ class Co3dDataset(BaseDataset):
 
         annos = [metadata[i] for i in ids]
 
-        target_image_shape = self.get_target_shape(aspect_ratio)
+        target_image_shape = self.get_target_shape(aspect_ratio) # [2026-02-10] @tcm: target_image_shape = [476, 518]
 
         images = []
         depths = []
@@ -268,9 +268,9 @@ class Co3dDataset(BaseDataset):
             "seq_name": set_name + "_" + seq_name,
             "ids": ids,
             "frame_num": len(extrinsics),
-            "images": images,
+            "images": images, # [2026-02-10] @tcm: batch["images"] = 9 x [(H=476, W=518, C=3)]
             "depths": depths,
-            "extrinsics": extrinsics,
+            "extrinsics": extrinsics, # [2026-02-10] @tcm: batch["extrinsics"] = 9 x [(H=3, W=4)]
             "intrinsics": intrinsics,
             "cam_points": cam_points,
             "world_points": world_points,

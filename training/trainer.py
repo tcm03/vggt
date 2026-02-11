@@ -283,7 +283,7 @@ class Trainer:
                 self.val_dataset.seed = self.seed_value
 
         if self.mode in ["train"]:
-            self.train_dataset = instantiate(self.data_conf.train, _recursive_=False)
+            self.train_dataset = instantiate(self.data_conf.train, _recursive_=False) # [2026-02-10] @tcm: self.train_dataset: data.dynamic_dataloader.DynamicTorchDataset
             self.train_dataset.seed = self.seed_value
 
     def _setup_ddp_distributed_training(self, distributed_conf: Dict, device: str):
@@ -557,8 +557,7 @@ class Trainer:
 
             batch = copy_data_to_device(batch, self.device, non_blocking=True)
 
-            accum_steps = self.accum_steps
-
+            accum_steps = self.accum_steps # [2026-02-11] @tcm: 2
             if accum_steps==1:
                 chunked_batches = [batch]
             else:
@@ -657,7 +656,6 @@ class Trainer:
             amp_type = torch.bfloat16
         else:
             amp_type = torch.float16
-        
         for i, chunked_batch in enumerate(chunked_batches):
             ddp_context = (
                 self.model.no_sync()
@@ -675,7 +673,7 @@ class Trainer:
                     )
 
 
-                loss = loss_dict["objective"]
+                loss = loss_dict["loss_objective"]
                 loss_key = f"Loss/{phase}_loss_objective"
                 batch_size = chunked_batch["images"].shape[0]
 
@@ -721,17 +719,17 @@ class Trainer:
         normalized_extrinsics, normalized_cam_points, normalized_world_points, normalized_depths = \
             normalize_camera_extrinsics_and_points_batch(
                 extrinsics=batch["extrinsics"],
-                cam_points=batch["cam_points"],
-                world_points=batch["world_points"],
-                depths=batch["depths"],
-                point_masks=batch["point_masks"],
+                cam_points=batch.get("cam_points", None),
+                world_points=batch.get("world_points", None),
+                depths=batch.get("depths", None),
+                point_masks=batch.get("point_masks", None)
             )
 
         # Replace the original values in the batch with the normalized ones.
         batch["extrinsics"] = normalized_extrinsics
-        batch["cam_points"] = normalized_cam_points
-        batch["world_points"] = normalized_world_points
-        batch["depths"] = normalized_depths
+        # batch["cam_points"] = normalized_cam_points # [2026-02-10] @tcm: for PM data, temporarily comment this
+        # batch["world_points"] = normalized_world_points # [2026-02-10] @tcm: for PM data, temporarily comment this
+        # batch["depths"] = normalized_depths # [2026-02-10] @tcm: for PM data, temporarily comment this
 
         return batch
 
@@ -743,7 +741,8 @@ class Trainer:
             A dictionary containing the computed losses.
         """
         # Forward pass
-        y_hat = model(images=batch["images"])
+        # y_hat = model(images=batch["images"])
+        y_hat = model(images=batch["images"]) # [2026-02-10] @tcm: update for PM data
         
         # Loss computation
         loss_dict = self.loss(y_hat, batch)

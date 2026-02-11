@@ -100,6 +100,7 @@ class DPTHead(nn.Module):
 
         if feature_only:
             self.scratch.output_conv1 = nn.Conv2d(head_features_1, head_features_1, kernel_size=3, stride=1, padding=1)
+            self.linear_projection = nn.Linear(in_features=features, out_features=output_dim, bias=True)
         else:
             self.scratch.output_conv1 = nn.Conv2d(
                 head_features_1, head_features_1 // 2, kernel_size=3, stride=1, padding=1
@@ -151,7 +152,7 @@ class DPTHead(nn.Module):
             frames_end_idx = min(frames_start_idx + frames_chunk_size, S)
 
             # Process batch of frames
-            if self.feature_only: # [2026-01-26] @tcm: False
+            if self.feature_only:
                 chunk_output = self._forward_impl(
                     aggregated_tokens_list, images, patch_start_idx, frames_start_idx, frames_end_idx
                 )
@@ -203,28 +204,40 @@ class DPTHead(nn.Module):
         dpt_idx = 0
 
         for layer_idx in self.intermediate_layer_idx:
-            x = aggregated_tokens_list[layer_idx][:, :, patch_start_idx:]
+            x = aggregated_tokens_list[layer_idx][:, :, patch_start_idx:] # [2026-02-11] @tcm: x.shape = [2, 7, 1258, 2048]
 
             # Select frames if processing a chunk
             if frames_start_idx is not None and frames_end_idx is not None:
                 x = x[:, frames_start_idx:frames_end_idx]
 
-            x = x.reshape(B * S, -1, x.shape[-1])
+            x = x.reshape(B * S, -1, x.shape[-1]) # [2026-02-11] @tcm: x.shape = [14, 1258, 2048]
 
             x = self.norm(x)
 
-            x = x.permute(0, 2, 1).reshape((x.shape[0], x.shape[-1], patch_h, patch_w))
+            x = x.permute(0, 2, 1).reshape((x.shape[0], x.shape[-1], patch_h, patch_w)) # [2026-02-11] @tcm: x.shape = [14, 2048, 34, 37]
 
-            x = self.projects[dpt_idx](x)
+            x = self.projects[dpt_idx](x) # [2026-02-11] @tcm: x.shape = [14, 256, 34, 37]
             if self.pos_embed:
                 x = self._apply_pos_embed(x, W, H)
-            x = self.resize_layers[dpt_idx](x)
+            x = self.resize_layers[dpt_idx](x) # [2026-02-11] @tcm: x.shape = [14, 256, 136, 148]
 
             out.append(x)
             dpt_idx += 1
 
+        # len(out)
+        # 4
+        # out[0].shape
+        # torch.Size([14, 256, 136, 148])
+        # out[1].shape
+        # torch.Size([14, 512, 68, 74])
+        # out[2].shape
+        # torch.Size([14, 1024, 34, 37])
+        # out[3].shape
+        # torch.Size([14, 1024, 17, 19])
         # Fuse features from multiple layers.
         out = self.scratch_forward(out)
+        # out.shape
+        # torch.Size([14, 256, 272, 296])
         # Interpolate fused output to match target image resolution.
         out = custom_interpolate(
             out,
@@ -237,6 +250,9 @@ class DPTHead(nn.Module):
             out = self._apply_pos_embed(out, W, H)
 
         if self.feature_only:
+            # [2026-02-11] @tcm: add the linear projection layer here
+            assert out.ndim == 4, f"unexpected ndim, shape: {out.shape}"
+            out = self.linear_projection(out.permute(0, 2, 3, 1))
             return out.view(B, S, *out.shape[1:])
 
         out = self.scratch.output_conv2(out)

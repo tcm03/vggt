@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from typing import Callable, Optional
+import torch
 
 from hydra.utils import instantiate
 import random
@@ -13,6 +14,115 @@ from torch.utils.data import DataLoader, Dataset, DistributedSampler, IterableDa
 from abc import ABC, abstractmethod
 
 from .worker_fn import get_worker_init_fn
+
+IGNORE_INDEX: int = -100
+
+
+def pm_collate_fn(batch: list[dict]):
+    # [2026-02-10] @tcm: batch: 5 x [dict(
+    # sample_id: int, 
+    # images: torch.Size([Si, 3, 476, 518]), 
+    # seg_images: torch.Size([Si, 476, 518]), 
+    # extrinsics: torch.Size([Si, 3, 4]), 
+    # intrinsics: torch.Size([Si, 3, 3]), 
+    # joint_names: list[str], 
+    # joint_types: list[str], 
+    # joint_axes: torch.Size([Si, 3]), 
+    # joint_origins: torch.Size([Si, 3]), 
+    # joint_ranges: torch.Size([Si, 2])
+    # )]
+    
+    max_s = max(item["images"].shape[0] for item in batch)
+    collated_batch = {
+        "sample_ids": [],
+        "images": [],
+        "seg_images": [],
+        "extrinsics": [],
+        "intrinsics": [],
+        "joint_names": [],
+        "joint_types": [],
+        "joint_axes": [],
+        "joint_origins": [],
+        "joint_ranges": [],
+        "nonpad_masks": [], # [2026-02-11] @tcm: shape (B, S), True entries indicate padded elements
+        "revolute_origin_masks": []
+    }
+
+    for item in batch:
+        s_i = item["images"].shape[0]
+        pad_amount = max_s - s_i
+        collated_batch["sample_ids"].append(item["sample_id"])
+
+        nonpad_mask = torch.cat([
+            torch.ones(s_i, dtype=torch.long), 
+            torch.zeros(pad_amount, dtype=torch.long)
+        ])
+        collated_batch["nonpad_masks"].append(nonpad_mask)
+        # Images: [Si, 3, H, W] -> Pad dim 0
+        if pad_amount > 0:
+            img_pad = torch.zeros((pad_amount, *item["images"].shape[1:]), dtype=item["images"].dtype)
+            padded_images = torch.cat([item["images"], img_pad], dim=0)
+
+            seg_img_pad = torch.full((pad_amount, *item["seg_images"].shape[1:]), IGNORE_INDEX, dtype=item["seg_images"].dtype)
+            padded_seg_images = torch.cat([item["seg_images"], seg_img_pad], dim=0)
+            
+            ext_pad = torch.zeros((pad_amount, *item["extrinsics"].shape[1:]), dtype=item["extrinsics"].dtype)
+            padded_extrinsics = torch.cat([item["extrinsics"], ext_pad], dim=0)
+            
+            int_pad = torch.zeros((pad_amount, *item["intrinsics"].shape[1:]), dtype=item["intrinsics"].dtype)
+            padded_intrinsics = torch.cat([item["intrinsics"], int_pad], dim=0)
+
+            ax_pad = torch.zeros((pad_amount, *item["joint_axes"].shape[1:]), dtype=item["joint_axes"].dtype)
+            padded_axes = torch.cat([item["joint_axes"], ax_pad], dim=0)
+
+            org_pad = torch.zeros((pad_amount, *item["joint_origins"].shape[1:]), dtype=item["joint_origins"].dtype)
+            padded_origins = torch.cat([item["joint_origins"], org_pad], dim=0)
+
+            rng_pad = torch.zeros((pad_amount, *item["joint_ranges"].shape[1:]), dtype=item["joint_ranges"].dtype)
+            # [2026-02-11] @tcm: is padding safe here to compute loss?
+            padded_ranges = torch.cat([item["joint_ranges"], rng_pad], dim=0)
+            
+            padded_names = item["joint_names"] + [""] * pad_amount
+            
+            padded_types = torch.cat([item["joint_types"], torch.tensor([IGNORE_INDEX] * pad_amount)])
+
+            padded_revolute_origin_masks = torch.cat([item["revolute_origin_masks"], torch.zeros(pad_amount, dtype=item["revolute_origin_masks"].dtype)])
+
+        else:
+            padded_images = item["images"]
+            padded_seg_images = item["seg_images"]
+            padded_extrinsics = item["extrinsics"]
+            padded_intrinsics = item["intrinsics"]
+            padded_axes = item["joint_axes"]
+            padded_origins = item["joint_origins"]
+            padded_ranges = item["joint_ranges"]
+            padded_names = item["joint_names"]
+            padded_types = item["joint_types"]
+            padded_revolute_origin_masks = item["revolute_origin_masks"]
+
+        collated_batch["images"].append(padded_images)
+        collated_batch["seg_images"].append(padded_seg_images)
+        collated_batch["extrinsics"].append(padded_extrinsics)
+        collated_batch["intrinsics"].append(padded_intrinsics)
+        collated_batch["joint_axes"].append(padded_axes)
+        collated_batch["joint_origins"].append(padded_origins)
+        collated_batch["joint_ranges"].append(padded_ranges)
+        collated_batch["joint_names"].append(padded_names)
+        collated_batch["joint_types"].append(padded_types)
+        collated_batch["revolute_origin_masks"].append(padded_revolute_origin_masks)
+
+    collated_batch["images"] = torch.stack(collated_batch["images"], dim=0)
+    collated_batch["seg_images"] = torch.stack(collated_batch["seg_images"], dim=0)
+    collated_batch["extrinsics"] = torch.stack(collated_batch["extrinsics"], dim=0)
+    collated_batch["intrinsics"] = torch.stack(collated_batch["intrinsics"], dim=0)
+    collated_batch["joint_axes"] = torch.stack(collated_batch["joint_axes"], dim=0)
+    collated_batch["joint_origins"] = torch.stack(collated_batch["joint_origins"], dim=0)
+    collated_batch["joint_ranges"] = torch.stack(collated_batch["joint_ranges"], dim=0)
+    collated_batch["nonpad_masks"] = torch.stack(collated_batch["nonpad_masks"], dim=0)
+    collated_batch["joint_types"] = torch.stack(collated_batch["joint_types"], dim=0)
+    collated_batch["revolute_origin_masks"] = torch.stack(collated_batch["revolute_origin_masks"], dim=0)
+    return collated_batch
+
 
 class DynamicTorchDataset(ABC):
     def __init__(
@@ -35,14 +145,14 @@ class DynamicTorchDataset(ABC):
         self.shuffle = shuffle
         self.pin_memory = pin_memory
         self.drop_last = drop_last
-        self.collate_fn = collate_fn
+        self.collate_fn = pm_collate_fn
         self.worker_init_fn = worker_init_fn
         self.persistent_workers = persistent_workers
         self.seed = seed
         self.max_img_per_gpu = max_img_per_gpu
 
         # Instantiate the dataset
-        self.dataset = instantiate(dataset, common_config=common_config, _recursive_=False)
+        self.dataset = instantiate(dataset, common_config=common_config, _recursive_=False) # [2026-02-10] @tcm: self.dataset: data.articulate_composed_dataset.ArticulateComposedDataset
 
         # Extract aspect ratio and image number ranges from the configuration
         self.aspect_ratio_range = common_config.augs.aspects  # e.g., [0.5, 1.0]
@@ -61,7 +171,8 @@ class DynamicTorchDataset(ABC):
             self.aspect_ratio_range,
             self.image_num_range,
             seed=seed,
-            max_img_per_gpu=max_img_per_gpu
+            max_img_per_gpu=max_img_per_gpu,
+            drop_last=True
         )
 
     def get_loader(self, epoch):
@@ -102,7 +213,9 @@ class DynamicBatchSampler(Sampler):
                  image_num_range,
                  epoch=0,
                  seed=42,
-                 max_img_per_gpu=48):
+                 max_img_per_gpu=48,
+                 drop_last=False # [2026-02-11] @tcm: drop last batch
+    ):
         """
         Initializes the dynamic batch sampler.
 
@@ -118,6 +231,8 @@ class DynamicBatchSampler(Sampler):
         self.aspect_ratio_range = aspect_ratio_range
         self.image_num_range = image_num_range
         self.rng = random.Random()
+
+        self.drop_last = drop_last
 
         # Uniformly sample from the range of possible image numbers
         # For any image number, the weight is 1.0 (uniform sampling). You can set any different weights here.
@@ -178,13 +293,17 @@ class DynamicBatchSampler(Sampler):
                 current_batch = []
                 for _ in range(batch_size):
                     try:
-                        item = next(sampler_iterator)  # item is (idx, aspect_ratio, image_num)
+                        item = next(sampler_iterator)  # item is (idx, image_num, aspect_ratio)
                         current_batch.append(item)
                     except StopIteration:
                         break  # No more samples
-
+                # [2026-02-10] @tcm: e.g., (37542, 9, 0.92), (60279, 9, 0.92), (68544, 9, 0.92), (70051, 9, 0.92), (15790, 9, 0.92) => 5 scenes, 9 frames/ scene => 45 total frames
                 if not current_batch:
                     break  # No more data to yield
+                
+                if len(current_batch) < batch_size:
+                    if self.drop_last:
+                        break
 
                 yield current_batch
 
@@ -216,7 +335,7 @@ class DynamicDistributedSampler(DistributedSampler):
             rank=rank,
             shuffle=shuffle,
             seed=seed,
-            drop_last=drop_last
+            drop_last=drop_last # [2026-02-11] @tcm: drop indices from dataset to ensure total # samples divisible by # gpus in distributed training
         )
         self.aspect_ratio = None
         self.image_num = None

@@ -53,6 +53,11 @@ def normalize_camera_extrinsics_and_points_batch(
         - Normalized world points (same shape as input world_points)
         - Normalized depths (same shape as input depths)
     """
+
+    # [2026-02-04] @tcm: set world_points = None if any element is nan in the case of removal of depth map and point map
+    if world_points is not None and torch.isnan(world_points).any():
+        world_points = None
+
     # Validate inputs
     check_valid_tensor(extrinsics, "extrinsics")
     check_valid_tensor(cam_points, "cam_points")
@@ -93,7 +98,9 @@ def normalize_camera_extrinsics_and_points_batch(
         new_world_points = None
 
 
-    if scale_by_points:
+    # [2026-02-04] @tcm: Change condition so that new_world_points could be considered None or not
+    # if scale_by_points:
+    if scale_by_points and new_world_points is not None:
         new_cam_points = cam_points.clone()
         new_depths = depths.clone()
 

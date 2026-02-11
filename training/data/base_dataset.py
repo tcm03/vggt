@@ -116,6 +116,7 @@ class BaseDataset(Dataset):
         self,
         image,
         depth_map,
+        seg_map_rgb, # [2026-02-10] @tcm: raw RGB segmentation map
         extri_opencv,
         intri_opencv,
         original_size,
@@ -154,11 +155,18 @@ class BaseDataset(Dataset):
         """
         # Make copies to avoid in-place operations affecting original data
         image = np.copy(image)
-        depth_map = np.copy(depth_map)
+        # depth_map = np.copy(depth_map) # [2026-02-10] @tcm: since now assume depth_map=None, we don't create ndarray out of it
+        if depth_map is not None:
+            depth_map = np.copy(depth_map)
         extri_opencv = np.copy(extri_opencv)
         intri_opencv = np.copy(intri_opencv)
         if track is not None:
             track = np.copy(track)
+
+        # [2026-02-10] @tcm: convert RGB segmentation to ID mask
+        seg_map = None
+        if seg_map_rgb is not None:
+            seg_map = rgb_seg_to_mask(seg_map_rgb)
 
         # Apply random scale augmentation during training if enabled
         if self.training and self.aug_scale:
@@ -174,8 +182,9 @@ class BaseDataset(Dataset):
             aug_size = original_size
 
         # Move principal point to the image center and crop if necessary
-        image, depth_map, intri_opencv, track = crop_image_depth_and_intrinsic_by_pp(
-            image, depth_map, intri_opencv, aug_size, track=track, filepath=filepath,
+        # [2026-02-10] @tcm: here update function with segmentation map
+        image, depth_map, seg_map, intri_opencv, track = crop_image_depth_and_intrinsic_by_pp(
+            image, depth_map, seg_map, intri_opencv, aug_size, track=track, filepath=filepath,
         )
 
         original_size = np.array(image.shape[:2])  # update original_size
@@ -192,8 +201,9 @@ class BaseDataset(Dataset):
 
         # Resize images and update intrinsics
         if self.rescale:
-            image, depth_map, intri_opencv, track = resize_image_depth_and_intrinsic(
-                image, depth_map, intri_opencv, target_shape, original_size, track=track,
+            # [2026-02-10] @tcm: update with segmentation map
+            image, depth_map, seg_map, intri_opencv, track = resize_image_depth_and_intrinsic(
+                image, depth_map, seg_map, intri_opencv, target_shape, original_size, track=track,
                 safe_bound=safe_bound,
                 rescale_aug=self.rescale_aug
             )
@@ -201,17 +211,20 @@ class BaseDataset(Dataset):
             print("Not rescaling the images")
 
         # Ensure final crop to target shape
-        image, depth_map, intri_opencv, track = crop_image_depth_and_intrinsic_by_pp(
-            image, depth_map, intri_opencv, target_shape, track=track, filepath=filepath, strict=True,
+        # [2026-02-10] @tcm: update with segmentation map
+        image, depth_map, seg_map, intri_opencv, track = crop_image_depth_and_intrinsic_by_pp(
+            image, depth_map, seg_map, intri_opencv, target_shape, track=track, filepath=filepath, strict=True,
         )
 
         # Apply 90-degree rotation if needed
         if rotate_to_portrait:
             assert self.landscape_check
             clockwise = np.random.rand() > 0.5
-            image, depth_map, extri_opencv, intri_opencv, track = rotate_90_degrees(
+            # [2026-02-10] @tcm: update
+            image, depth_map, seg_map, extri_opencv, intri_opencv, track = rotate_90_degrees(
                 image,
                 depth_map,
+                seg_map,
                 extri_opencv,
                 intri_opencv,
                 clockwise=clockwise,
@@ -226,6 +239,7 @@ class BaseDataset(Dataset):
         return (
             image,
             depth_map,
+            seg_map, # [2026-02-10] @tcm: update return
             extri_opencv,
             intri_opencv,
             world_coords_points,

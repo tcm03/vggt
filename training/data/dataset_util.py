@@ -24,7 +24,14 @@ from vggt.utils.geometry import closed_form_inverse_se3
 
 #####################################################################################################################
 def crop_image_depth_and_intrinsic_by_pp(
-    image, depth_map, intrinsic, target_shape, track=None, filepath=None, strict=False
+    image, 
+    depth_map, 
+    seg_map, # [2026-02-10] @tcm: added segmentation map
+    intrinsic, 
+    target_shape, 
+    track=None, 
+    filepath=None, 
+    strict=False
 ):
     """
     TODO: some names of width and height seem not consistent. Need to check.
@@ -115,8 +122,15 @@ def crop_image_depth_and_intrinsic_by_pp(
 
     # Perform the crop
     image = image[start_x:end_x, start_y:end_y, :]
+    if depth_map is not None and np.ndim(depth_map) == 0:
+        depth_map = None # [2026-02-04] @tcm: fix the conditionals, consider None and np.array(None) to have 0 dim
     if depth_map is not None:
         depth_map = depth_map[start_x:end_x, start_y:end_y]
+
+    if seg_map is not None and np.ndim(seg_map) == 0:
+        seg_map = None # [2026-02-04] @tcm: fix the conditionals, consider None and np.array(None) to have 0 dim
+    if seg_map is not None:
+        seg_map = seg_map[start_x:end_x, start_y:end_y]
 
     # Shift the principal point in the intrinsic
     intrinsic[1, 2] = intrinsic[1, 2] - start_x
@@ -154,13 +168,22 @@ def crop_image_depth_and_intrinsic_by_pp(
                     mode="constant",
                     constant_values=0,
                 )
+            if seg_map is not None:
+                seg_map = np.pad(
+                    seg_map,
+                    pad_width=((0, pad_h), (0, pad_w)),
+                    mode="constant",
+                    constant_values=0,
+                )
 
-    return image, depth_map, intrinsic, track
+    # return image, depth_map, intrinsic, track
+    return image, depth_map, seg_map, intrinsic, track # [2026-02-10] @tcm: returned preprocessed segmentation map
 
 
 def resize_image_depth_and_intrinsic(
     image,
     depth_map,
+    seg_map, # [2026-02-10] @tcm: add segmentation map for preprocessing
     intrinsic,
     target_shape,
     original_size,
@@ -229,6 +252,8 @@ def resize_image_depth_and_intrinsic(
     image = image.resize(tuple(output_resolution), resample=lanczos if max_resize_scale < 1 else bicubic)
     image = np.array(image)
 
+    if depth_map is not None and np.ndim(depth_map) == 0:
+        depth_map = None
     if depth_map is not None:
         depth_map = cv2.resize(
             depth_map,
@@ -237,6 +262,13 @@ def resize_image_depth_and_intrinsic(
             fy=max_resize_scale,
             interpolation=cv2.INTER_NEAREST,
         )
+
+    if seg_map is not None:
+        seg_map = cv2.resize(
+            seg_map.astype(np.uint8),
+            tuple(output_resolution),
+            interpolation=cv2.INTER_NEAREST,
+        ).astype(np.int64)
 
     actual_size = np.array(image.shape[:2])
     actual_resize_scale = np.max(actual_size / original_size)
@@ -254,8 +286,10 @@ def resize_image_depth_and_intrinsic(
         intrinsic[0, 2] = intrinsic[0, 2] - 0.5
         intrinsic[1, 2] = intrinsic[1, 2] - 0.5
 
-    assert image.shape[:2] == depth_map.shape[:2]
-    return image, depth_map, intrinsic, track
+    if depth_map is not None:
+        assert image.shape[:2] == depth_map.shape[:2]
+    # return image, depth_map, intrinsic, track
+    return image, depth_map, seg_map, intrinsic, track # [2026-02-10] @tcm: return preprocessed segmentation map
 
 
 def threshold_depth_map(
@@ -409,7 +443,13 @@ def depth_to_cam_coords_points(
 
 
 def rotate_90_degrees(
-    image, depth_map, extri_opencv, intri_opencv, clockwise=True, track=None
+    image, 
+    depth_map, 
+    seg_map, # [2026-02-10] @tcm: update with segmentation map
+    extri_opencv, 
+    intri_opencv, 
+    clockwise=True, 
+    track=None
 ):
     """
     Rotates the input image, depth map, and camera parameters by 90 degrees.
@@ -450,7 +490,11 @@ def rotate_90_degrees(
     image_height, image_width = image.shape[:2]
 
     # Rotate the image and depth map
-    rotated_image, rotated_depth_map = rotate_image_and_depth_rot90(image, depth_map, clockwise)
+    # rotated_image, rotated_depth_map = rotate_image_and_depth_rot90(image, depth_map, clockwise)
+    # [2026-02-10] @tcm: update with segmentation map
+    rotated_image, rotated_depth_map, rotated_seg_map = rotate_image_and_depth_rot90(
+        image, depth_map, seg_map, clockwise
+    )
     # Adjust the intrinsic matrix
     new_intri_opencv = adjust_intrinsic_matrix_rot90(intri_opencv, image_width, image_height, clockwise)
 
@@ -465,13 +509,19 @@ def rotate_90_degrees(
     return (
         rotated_image,
         rotated_depth_map,
+        rotated_seg_map, # [2026-02-10] @tcm: update
         new_extri_opencv,
         new_intri_opencv,
         new_track,
     )
 
 
-def rotate_image_and_depth_rot90(image, depth_map, clockwise):
+def rotate_image_and_depth_rot90(
+    image, 
+    depth_map, 
+    seg_map, # [2026-02-10] @tcm: update
+    clockwise
+):
     """
     Rotates the given image and depth map by 90 degrees (clockwise or counterclockwise),
     using a transpose+flip pattern.
@@ -489,19 +539,29 @@ def rotate_image_and_depth_rot90(image, depth_map, clockwise):
             (rotated_image, rotated_depth_map)
     """
     rotated_depth_map = None
+    rotated_seg_map = None
     if clockwise:
         rotated_image = np.transpose(image, (1, 0, 2))  # Transpose height and width
         rotated_image = np.flip(rotated_image, axis=1)  # Flip horizontally
         if depth_map is not None:
             rotated_depth_map = np.transpose(depth_map, (1, 0))
             rotated_depth_map = np.flip(rotated_depth_map, axis=1)
+        if seg_map is not None:
+            rotated_seg_map = np.transpose(seg_map, (1, 0))
+            rotated_seg_map = np.flip(rotated_seg_map, axis=1)
     else:
         rotated_image = np.transpose(image, (1, 0, 2))  # Transpose height and width
         rotated_image = np.flip(rotated_image, axis=0)  # Flip vertically
         if depth_map is not None:
             rotated_depth_map = np.transpose(depth_map, (1, 0))
             rotated_depth_map = np.flip(rotated_depth_map, axis=0)
-    return np.copy(rotated_image), np.copy(rotated_depth_map)
+        if seg_map is not None:
+            rotated_seg_map = np.transpose(seg_map, (1, 0))
+            rotated_seg_map = np.flip(rotated_seg_map, axis=0)
+    res_depth = np.copy(rotated_depth_map) if rotated_depth_map is not None else None
+    res_seg = np.copy(rotated_seg_map) if rotated_seg_map is not None else None
+    # return np.copy(rotated_image), np.copy(rotated_depth_map)
+    return np.copy(rotated_image), res_depth, res_seg # [2026-02-10] @tcm: update return
 
 
 def adjust_extrinsic_matrix_rot90(extri_opencv, clockwise):
@@ -709,3 +769,30 @@ def load_16big_png_depth(depth_png: str) -> np.ndarray:
             .reshape((depth_pil.size[1], depth_pil.size[0]))
         )
     return depth
+
+def rgb_seg_to_mask(seg_img):
+    """
+    Converts RGB segmentation image to 2D integer mask.
+    Colors:
+    - Black (0,0,0) -> 0 (Background)
+    - Blue (100,100,200) -> 1 (Static)
+    - Red (255,50,50) -> 2 (Active)
+    """
+    # Initialize mask with 0 (Background)
+    h, w, _ = seg_img.shape
+    mask = np.zeros((h, w), dtype=np.int32)
+    
+    # Define thresholds or exact matches. 
+    # Since these are synthetic renders, exact match usually works, 
+    # but a small tolerance is safer against compression artifacts.
+    
+    # Check for Static (Blue: 100, 100, 200)
+    # Using a small margin of error (tolerance) just in case
+    is_static = (np.abs(seg_img - [100, 100, 200]) < 5).all(axis=2)
+    mask[is_static] = 1
+    
+    # Check for Active (Red: 255, 50, 50)
+    is_active = (np.abs(seg_img - [255, 50, 50]) < 5).all(axis=2)
+    mask[is_active] = 2
+    
+    return mask

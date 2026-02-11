@@ -122,6 +122,8 @@ def activate_head(out, activation="norm_exp", conf_activation="expp1"):
         pts3d = xyz
     elif activation == "softmax":
         pts3d = torch.softmax(xyz, dim=-1)
+    elif activation == "log_softmax":
+        pts3d = torch.log_softmax(xyz, dim=-1)
     else:
         raise ValueError(f"Unknown activation: {activation}")
 
