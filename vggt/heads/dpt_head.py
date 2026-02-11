@@ -135,11 +135,18 @@ class DPTHead(nn.Module):
                 - If feature_only=True: Feature maps with shape [B, S, C, H, W]
                 - Otherwise: Tuple of (predictions, confidence) both with shape [B, S, 1, H, W]
         """
+        # [2026-02-11] @tcm: Here we drop images of first view according to current VGGTiculate design
+        images = images[:, 1:, ...]
+
         B, S, _, H, W = images.shape
+
+        # [2026-02-11] @tcm: Here we drop tokens of first view according to current VGGTiculate design
+        articulated_tokens_list = [aggregated_tokens[:, 1:, ...] for aggregated_tokens in aggregated_tokens_list]
 
         # If frames_chunk_size is not specified or greater than S, process all frames at once
         if frames_chunk_size is None or frames_chunk_size >= S:
-            return self._forward_impl(aggregated_tokens_list, images, patch_start_idx)
+            # return self._forward_impl(aggregated_tokens_list, images, patch_start_idx)
+            return self._forward_impl(articulated_tokens_list, images, patch_start_idx)
 
         # Otherwise, process frames in chunks to manage memory usage
         assert frames_chunk_size > 0
@@ -154,12 +161,14 @@ class DPTHead(nn.Module):
             # Process batch of frames
             if self.feature_only:
                 chunk_output = self._forward_impl(
-                    aggregated_tokens_list, images, patch_start_idx, frames_start_idx, frames_end_idx
+                    # aggregated_tokens_list, images, patch_start_idx, frames_start_idx, frames_end_idx
+                    articulated_tokens_list, images, patch_start_idx, frames_start_idx, frames_end_idx
                 )
                 all_preds.append(chunk_output)
             else:
                 chunk_preds, chunk_conf = self._forward_impl(
-                    aggregated_tokens_list, images, patch_start_idx, frames_start_idx, frames_end_idx
+                    # aggregated_tokens_list, images, patch_start_idx, frames_start_idx, frames_end_idx
+                    articulated_tokens_list, images, patch_start_idx, frames_start_idx, frames_end_idx
                 ) # [2026-01-26] @tcm: chunk_preds.shape = [1, #frames=8, H=350, W=518, 1], chunk_conf.shape = [1, #frames=8, H=350, W=518]
                 all_preds.append(chunk_preds)
                 all_conf.append(chunk_conf)

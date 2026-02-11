@@ -36,25 +36,26 @@ class AxisHead(nn.Module):
 
         self.pose_branch = Mlp(in_features=dim_in, hidden_features=dim_in // 2, out_features=self.target_dim, drop=0)
 
-    def forward(self, aggregated_tokens_list: list, num_iterations: int = 4) -> list:
+    def forward(self, aggregated_tokens_list: list) -> list:
         """
         Forward pass to predict axis parameters.
 
         Args:
             aggregated_tokens_list (list): List of token tensors from the network;
                 the last tensor is used for prediction.
-            num_iterations (int, optional): Number of iterative refinement steps. Defaults to 4.
 
         Returns:
             list: A list of predicted axis encodings (post-activation) from each iteration.
         """
         # Use tokens from the last block for axis prediction.
-        tokens = aggregated_tokens_list[-1] # [2026-01-26] @tcm: tokens.shape = [1, B=25, S=930, D=2048]
+        tokens = aggregated_tokens_list[-1] # [2026-01-26] @tcm: tokens.shape = [B=1, S=25, N=930, D=2048]
+        assert tokens.ndim == 4 and tokens.shape[1] > 1, f"expected shape: (B, S, N, D), found {tokens.shape}; expect S dim > 1 view"
+        tokens = tokens[:, 1:, ...] # [2026-02-11] @tcm: don't predict axis for 1st view (rest state)
 
         # Extract the axis tokens
         pose_tokens = tokens[:, :, 1]
-        pose_tokens = self.token_norm(pose_tokens) # [2026-01-26] @tcm: pose_tokens.shape = [1, B=25, D=2048]
-        pred_pose_enc_list = [self.pose_branch(pose_tokens)]
+        pose_tokens = self.token_norm(pose_tokens) # [2026-01-26] @tcm: pose_tokens.shape = [B, S-1, D=2048]
+        pred_pose_enc_list = [self.pose_branch(pose_tokens)] # [2026-02-11] @tcm: [pred_pose_enc.shape] = [[B, S-1, D=6]]
         return pred_pose_enc_list
 
 

@@ -60,19 +60,19 @@ class VGGTiculate(nn.Module, PyTorchModelHubMixin):
         if len(images.shape) == 4:
             images = images.unsqueeze(0)
 
-        aggregated_tokens_list, patch_start_idx = self.aggregator(images) # [2026-01-26] @tcm: aggregated_tokens_list = [torch.Size[1, B=25, S=930, D=2048]] x L=24
+        aggregated_tokens_list, patch_start_idx = self.aggregator(images) # [2026-01-26] @tcm: aggregated_tokens_list = [torch.Size[B=1, S=25, N=930, D=2048]] x L=24
 
         predictions = {}
 
         with torch.cuda.amp.autocast(enabled=False):
 
             if self.cls_head is not None:
-                cls_logits = self.cls_head(aggregated_tokens_list)
+                cls_logits = self.cls_head(aggregated_tokens_list) # [2026-02-11] @tcm: cls_logits.shape = [B, S-1, 6]
                 predictions["cls_logits"] = cls_logits
 
             if self.axis_head is not None:
                 pose_enc_list = self.axis_head(aggregated_tokens_list)
-                predictions["pose_enc"] = pose_enc_list[-1]  # pose encoding of the last iteration
+                predictions["pose_enc"] = pose_enc_list[-1]  # [2026-02-11] @tcm: pose_enc.shape = [B, S-1, 6]
                 predictions["pose_enc_list"] = pose_enc_list
                 
             if self.segmentation_head is not None:

@@ -48,11 +48,13 @@ class ClsHead(nn.Module):
             cls_logits
         """
         # Use tokens from the last block for axis prediction.
-        tokens = aggregated_tokens_list[-1] # [2026-01-26] @tcm: tokens.shape = [1, B=25, S=930, D=2048]
+        tokens = aggregated_tokens_list[-1] # [2026-01-26] @tcm: tokens.shape = [B, S, N, D=2048]
+        assert tokens.ndim == 4 and tokens.shape[1] > 1, f"expected shape: (B, S, N, D), found {tokens.shape}; expect S dim > 1 view"
+        tokens = tokens[:, 1:, ...] # [2026-02-11] @tcm: don't predict joint type for 1st view (rest state)
 
         # Extract the cls tokens
         pose_tokens = tokens[:, :, 0]
-        pose_tokens = self.token_norm(pose_tokens) # [2026-01-26] @tcm: pose_tokens.shape = [1, B=25, D=2048]
+        pose_tokens = self.token_norm(pose_tokens) # [2026-01-26] @tcm: pose_tokens.shape = [B, S-1, D=2048]
 
         cls_logits = self.pose_branch(pose_tokens)
         return cls_logits

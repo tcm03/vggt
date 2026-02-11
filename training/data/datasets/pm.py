@@ -13,6 +13,7 @@ import logging
 import cv2
 import random
 import numpy as np
+import random
 
 
 from data.dataset_util import *
@@ -83,7 +84,9 @@ class PMDataset(BaseDataset):
             sample_json = json.load(f)
         num_images = len(sample_json) + 1 # all joint-state images + rest-state image
         if img_per_seq is not None and img_per_seq < num_images:
+            assert img_per_seq > 1, "cannot < 2, explanation right below"
             num_images = img_per_seq
+        assert num_images > 1, "each sample requires >= 2 images, 1 at rest state and 1 movable"
         target_image_shape = self.get_target_shape(aspect_ratio)
         
         images = []
@@ -98,12 +101,23 @@ class PMDataset(BaseDataset):
         joint_origins = []
         revolute_origin_masks = [] # [2026-02-11] @tcm: store 1s for origins of revolute joint, 0s for prismatic's
         joint_ranges = []
-        for idx, (joint_name, joint_info) in enumerate(sample_json.items()):
-            if idx == num_images:
-                break
-            image_path = os.path.join(self.PM_DIR, sample_id, "render", f"{joint_name}.png")
-            image = read_image_cv2(image_path)
-            seg_path = os.path.join(self.PM_DIR, sample_id, "render", f"{joint_name}_seg.png")
+        sample_json_pairs = list(sample_json.items())
+        sample_indices = random.sample(range(len(sample_json_pairs)), num_images - 1) # [2026-02-11] @tcm: for movables
+        sample_indices = [-1] + sample_indices
+
+        for idx in sample_indices:
+            
+            if idx == -1:
+                joint_name = "rest"
+                joint_info = sample_json_pairs[sample_indices[1]][1] # [2026-02-11] @tcm: just take from next guy as place-holder
+                image_path = os.path.join(self.PM_DIR, sample_id, "render", "rest.png")
+                seg_path = os.path.join(self.PM_DIR, sample_id, "render", "rest_seg.png")
+            else:
+                joint_name, joint_info = sample_json_pairs[idx]
+                image_path = os.path.join(self.PM_DIR, sample_id, "render", f"{joint_name}.png")
+                seg_path = os.path.join(self.PM_DIR, sample_id, "render", f"{joint_name}_seg.png")
+            
+            image = read_image_cv2(image_path)            
             seg_image = read_image_cv2(seg_path)
             original_size = np.array(image.shape[:2])
             joint_type = convert_joint_type(joint_info["type"])
