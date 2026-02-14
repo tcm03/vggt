@@ -42,6 +42,11 @@ from train_utils.logging import setup_logging
 from train_utils.normalization import normalize_camera_extrinsics_and_points_batch
 from train_utils.optimizer import construct_optimizers
 
+import sys
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PARENT_DIR = os.path.dirname(CURRENT_DIR) # points to 'vggt' root
+sys.path.append(PARENT_DIR)
+from metrics.eval import eval_batch
 
 class Trainer:
     """
@@ -262,6 +267,17 @@ class Trainer:
                 f"[Done] Freezing modules: {self.optim_conf.frozen_module_names} on rank {self.distributed_rank}"
             )
 
+        for layer_name, params in self.model.named_parameters():
+            # Check if the layer name contains either keyword
+            if "cls_token" in layer_name or "axis_token" in layer_name:
+                params.requires_grad = True
+
+        for layer_name, params in self.model.named_parameters():
+            # params.requires_grad is a boolean: True if trainable, False if frozen
+            status = "Trainable" if params.requires_grad else "Frozen"
+            if status == "Trainable":
+                print(f"Layer: {layer_name} | Status: {status} | Shape: {list(params.shape)}")
+
         # Log model summary on rank 0
         if self.rank == 0:
             model_summary_path = os.path.join(self.logging_conf.log_dir, "model.txt")
@@ -424,9 +440,15 @@ class Trainer:
         phase = 'val'
         
         loss_names = self._get_scalar_log_keys(phase)
-        loss_names = [f"Loss/{phase}_{name}" for name in loss_names]
+        # loss_names = [f"Loss/{phase}_{name}" for name in loss_names]
+        full_loss_names = []
+        for name in loss_names:
+            if name.startswith("loss"):
+                full_loss_names.append(f"Loss/{phase}_{name}")
+            else:
+                full_loss_names.append(f"Articulation/{phase}_{name}")
         loss_meters = {
-            name: AverageMeter(name, self.device, ":.4f") for name in loss_names
+            name: AverageMeter(name, self.device, ":.4f") for name in full_loss_names
         }
         
         progress = ProgressMeter(
@@ -495,7 +517,18 @@ class Trainer:
             if data_iter % self.logging_conf.log_freq == 0:
                 progress.display(data_iter)
 
-
+        total_joint_axis_err = loss_meters[f"Articulation/{phase}_joint_axis_err"].sum
+        total_joint_origin_err = loss_meters[f"Articulation/{phase}_joint_origin_err"].sum
+        total_num_samples = loss_meters[f"Articulation/{phase}_num_samples"].sum
+        total_num_incorrect_types = loss_meters[f"Articulation/{phase}_num_incorrect_types"].sum
+        total_num_revolute_joints = loss_meters[f"Articulation/{phase}_num_revolute_joints"].sum
+        avg_joint_axis_err = total_joint_axis_err / total_num_samples
+        avg_joint_origin_err = total_joint_origin_err / total_num_revolute_joints
+        avg_num_incorrect_types = total_num_incorrect_types / total_num_samples
+        print(f"[{phase.upper()}] Average joint type error: {avg_num_incorrect_types}")
+        print(f"[{phase.upper()}] Average joint axis error: {avg_joint_axis_err}")
+        print(f"[{phase.upper()}] Average joint origin error: {avg_joint_origin_err}")
+        
         return True
 
     def train_epoch(self, train_loader):        
@@ -506,9 +539,15 @@ class Trainer:
         phase = 'train'
         
         loss_names = self._get_scalar_log_keys(phase)
-        loss_names = [f"Loss/{phase}_{name}" for name in loss_names]
+        # loss_names = [f"Loss/{phase}_{name}" for name in loss_names]
+        full_loss_names = []
+        for name in loss_names:
+            if name.startswith("loss"):
+                full_loss_names.append(f"Loss/{phase}_{name}")
+            else:
+                full_loss_names.append(f"Articulation/{phase}_{name}")
         loss_meters = {
-            name: AverageMeter(name, self.device, ":.4f") for name in loss_names
+            name: AverageMeter(name, self.device, ":.4f") for name in full_loss_names
         }
         
         for config in self.gradient_clipper.configs: 
@@ -632,6 +671,18 @@ class Trainer:
             if data_iter % self.logging_conf.log_freq == 0:
                 progress.display(data_iter)
 
+        total_joint_axis_err = loss_meters[f"Articulation/{phase}_joint_axis_err"].sum
+        total_joint_origin_err = loss_meters[f"Articulation/{phase}_joint_origin_err"].sum
+        total_num_samples = loss_meters[f"Articulation/{phase}_num_samples"].sum
+        total_num_incorrect_types = loss_meters[f"Articulation/{phase}_num_incorrect_types"].sum
+        total_num_revolute_joints = loss_meters[f"Articulation/{phase}_num_revolute_joints"].sum
+        avg_joint_axis_err = total_joint_axis_err / total_num_samples
+        avg_joint_origin_err = total_joint_origin_err / total_num_revolute_joints
+        avg_num_incorrect_types = total_num_incorrect_types / total_num_samples
+        print(f"[{phase.upper()}] Average joint type error: {avg_num_incorrect_types}")
+        print(f"[{phase.upper()}] Average joint axis error: {avg_joint_axis_err}")
+        print(f"[{phase.upper()}] Average joint origin error: {avg_joint_origin_err}")
+        
         return True
 
     def _run_steps_on_batch_chunks(
@@ -746,9 +797,30 @@ class Trainer:
         
         # Loss computation
         loss_dict = self.loss(y_hat, batch)
+
+        batch_nonpad_masks = batch["nonpad_masks"].cpu().numpy()[:, 1:]
+        batch_joint_axis_err, batch_joint_origin_err, num_revolute_joints, num_incorrect_types = eval_batch(
+            pred_axes_dir = y_hat["pose_enc"].detach().cpu().numpy()[..., :3],
+            pred_axes_orig = y_hat["pose_enc"].detach().cpu().numpy()[..., 3:6],
+            pred_joint_logits = y_hat["cls_logits"].detach().cpu().numpy(),
+            gt_axes_dir = batch["joint_axes"][:, 1:].cpu().numpy(),
+            gt_axes_orig = batch["joint_origins"][:, 1:].cpu().numpy(),
+            gt_joint_types = batch["joint_types"].cpu().numpy()[:, 1:],
+            nonpad_masks = batch_nonpad_masks
+        )
+        batch_num_samples = batch_nonpad_masks.sum()
         
         # Combine all data for logging
-        log_data = {**y_hat, **loss_dict, **batch}
+        log_data = {
+            **y_hat, 
+            **loss_dict, 
+            **batch,
+            "joint_axis_err": batch_joint_axis_err,
+            "joint_origin_err": batch_joint_origin_err,
+            "num_samples": batch_num_samples,
+            "num_incorrect_types": num_incorrect_types,
+            "num_revolute_joints": num_revolute_joints
+        }
 
         self._update_and_log_scalars(log_data, phase, self.steps[phase], loss_meters)
         self._log_tb_visuals(log_data, phase, self.steps[phase])
@@ -764,7 +836,10 @@ class Trainer:
         for key in keys_to_log:
             if key in data:
                 value = data[key].item() if torch.is_tensor(data[key]) else data[key]
-                loss_meters[f"Loss/{phase}_{key}"].update(value, batch_size)
+                if key.startswith("loss"):
+                    loss_meters[f"Loss/{phase}_{key}"].update(value, batch_size)
+                else:
+                    loss_meters[f"Articulation/{phase}_{key}"].update(value, batch_size)
                 if step % self.logging_conf.log_freq == 0 and self.rank == 0:
                     self.tb_writer.log(f"Values/{phase}/{key}", value, step)
 

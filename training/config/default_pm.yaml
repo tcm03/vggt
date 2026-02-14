@@ -1,13 +1,13 @@
 defaults:
   - default_dataset.yaml
 
-exp_name: exp001
+exp_name: larm_settings
 img_size: 518
 num_workers: 8
 seed_value: 42
 accum_steps: 1    # We did not use gradient accumulation in our training, while if you suffer from OOM, you can try to use it.
 patch_size: 14
-val_epoch_freq: 5
+val_epoch_freq: 1
 max_img_per_gpu: 24
 
 limit_train_batches: 800
@@ -69,6 +69,11 @@ logging:
         - loss_joint_origin
         - loss_segmentation
         - loss_objective
+        - joint_axis_err
+        - joint_origin_err
+        - num_samples
+        - num_incorrect_types
+        - num_revolute_joints
     val:
       keys_to_log:
         - loss_joint_type
@@ -76,12 +81,17 @@ logging:
         - loss_joint_origin
         - loss_segmentation
         - loss_objective
+        - joint_axis_err
+        - joint_origin_err
+        - num_samples
+        - num_incorrect_types
+        - num_revolute_joints
 
 
 
 checkpoint:
   save_dir: logs/${exp_name}/ckpts
-  save_freq: 5
+  save_freq: 1
   resume_checkpoint_path: /home/minhtc8/lustre/minhtc8/vggt/checkpoints/model.pt
   strict: False
 
@@ -159,7 +169,7 @@ optim:
 
 
 
-max_epochs: 1
+max_epochs: 5
 
 model:
   _target_: vggt.models.vggticulate.VGGTiculate
